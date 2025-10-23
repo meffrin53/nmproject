@@ -1,0 +1,429 @@
+<!--
+Virtual Whiteboard — All-in-one (index.html)
+
+How to use (step-by-step):
+1. Create a folder on your computer (e.g. "virtual-whiteboard").
+2. Create a file named `index.html` inside that folder.
+3. Copy the entire contents of this document into that `index.html` file.
+4. Open `index.html` in your browser (double-click or drag into browser).
+
+Notes:
+- This single file contains HTML + CSS + JavaScript (so it's easiest to run).
+- If you prefer separate files (index.html, style.css, script.js) tell me and I'll split them.
+- Features included: drawing (mouse & touch), color/size, eraser, undo/redo, clear, save/download PNG,
+  add draggable sticky notes, text tool, localStorage restore, keyboard shortcuts (Ctrl+Z / Ctrl+Y).
+
+Feel free to ask for any additional features (collaboration mock, shape tools, smoother strokes, export history).
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Virtual Whiteboard — Naan Mudhalvan</title>
+
+  <style>
+    /* ---------- BASIC LAYOUT ---------- */
+    :root{
+      --bg: #0f1724;
+      --panel: #0b1220;
+      --muted: #9aa4b2;
+      --accent: #7c3aed;
+      --glass: rgba(255,255,255,0.04);
+      --card: rgba(255,255,255,0.03);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,Segoe UI,Roboto,Arial; background: linear-gradient(180deg,#071025 0%, #071226 100%); color:#e6eef6}
+    .app{display:flex;flex-direction:column;height:100vh}
+
+    header.topbar{
+      display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));backdrop-filter: blur(6px);border-bottom:1px solid rgba(255,255,255,0.03);
+    }
+    header .title{display:flex;align-items:center;gap:12px}
+    header h1{font-size:16px;margin:0}
+    header p{margin:0;color:var(--muted);font-size:13px}
+
+    /* ---------- TOOLBAR ---------- */
+    .toolbar{display:flex;align-items:center;gap:8px}
+    .tool-btn{background:var(--card);border:0;padding:8px;border-radius:8px;color:inherit;cursor:pointer;display:inline-grid;place-items:center;min-width:40px}
+    .tool-btn:hover{transform:translateY(-2px)}
+    .tool-btn.active{box-shadow:0 6px 18px rgba(124,58,237,0.14);border:1px solid rgba(124,58,237,0.18)}
+    .controls-row{display:flex;align-items:center;gap:8px}
+    input[type=range]{width:110px}
+    input[type=color]{height:40px;width:44px;padding:0;border-radius:8px;border:0}
+
+    /* ---------- BOARD AREA ---------- */
+    .board-wrap{flex:1;display:flex;align-items:stretch;gap:10px;padding:12px}
+    .board{flex:1;position:relative;border-radius:12px;overflow:hidden;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02)}
+    canvas#canvas{display:block;width:100%;height:100%}
+
+    /* ---------- NOTES & TEXT ITEMS ---------- */
+    .note{position:absolute;min-width:160px;max-width:300px;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(2,6,23,0.6);color:#0b1220}
+    .note .note-header{background:linear-gradient(90deg,#ffd86b,#ff7ab6);padding:8px;border-radius:10px 10px 0 0;cursor:grab;display:flex;align-items:center;justify-content:space-between}
+    .note .note-body{padding:10px;min-height:50px;outline:none}
+    .note .note-close{background:transparent;border:0;padding:6px;margin-left:8px;font-weight:bold;cursor:pointer}
+
+    .text-item{position:absolute;background:transparent;color:#e6eef6;min-width:60px;padding:4px 6px;border-radius:6px;outline:none;border:1px dashed rgba(255,255,255,0.06)}
+
+    /* ---------- FOOTER ---------- */
+    footer{padding:8px 12px;color:var(--muted);font-size:13px;text-align:right}
+
+    /* small screens */
+    @media (max-width:720px){
+      .toolbar{flex-wrap:wrap}
+      input[type=range]{width:80px}
+    }
+
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="title">
+        <div style="width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#06b6d4);display:grid;place-items:center;font-weight:700">WM</div>
+        <div>
+          <h1>Virtual Whiteboard</h1>
+          <p>Frontend-only demo • Mouse & touch • Save / Undo / Sticky notes</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="controls-row">
+          <button title="Pencil" id="pencilBtn" class="tool-btn active">✏️</button>
+          <button title="Eraser" id="eraserBtn" class="tool-btn">🧽</button>
+          <input type="color" id="colorPicker" value="#000000" title="Brush color" />
+          <input type="range" id="sizeRange" min="1" max="60" value="4" title="Brush size" />
+          <button title="Undo (Ctrl+Z)" id="undoBtn" class="tool-btn">↶</button>
+          <button title="Redo (Ctrl+Y)" id="redoBtn" class="tool-btn">↷</button>
+          <button title="Clear board" id="clearBtn" class="tool-btn">🗑️</button>
+          <button title="Save as PNG" id="saveBtn" class="tool-btn">💾</button>
+          <button title="Add sticky note" id="addNoteBtn" class="tool-btn">🗒️</button>
+          <button title="Text tool" id="textToolBtn" class="tool-btn">🔤</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="board-wrap">
+      <div class="board" id="board">
+        <canvas id="canvas"></canvas>
+        <!-- sticky notes and text items will be appended here -->
+      </div>
+    </div>
+
+    <footer>
+      Tip: Use <strong>Ctrl+Z</strong> / <strong>Ctrl+Y</strong> for undo/redo. Draw with mouse or touch. Click 'Text' then click the board to add editable text.
+    </footer>
+  </div>
+
+  <script>
+    /* -------------------- SETUP -------------------- */
+    const canvas = document.getElementById('canvas');
+    const board = document.getElementById('board');
+    const ctx = canvas.getContext('2d', {alpha:true});
+
+    let drawing = false;
+    let current = { x:0, y:0 };
+    let tool = 'pencil'; // 'pencil' or 'eraser' or 'text'
+    let brushColor = document.getElementById('colorPicker').value;
+    let brushSize = parseInt(document.getElementById('sizeRange').value,10);
+
+    // undo/redo stacks store dataURLs
+    const undoStack = [];
+    const redoStack = [];
+    const MAX_STACK = 30;
+
+    function setCanvasSize(){
+      // maintain devicePixelRatio for crisp lines
+      const rect = board.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+      ctx.scale(dpr, dpr);
+      // if there's saved image in localStorage we will restore later
+    }
+
+    // initial size
+    setCanvasSize();
+    window.addEventListener('resize', () => {
+      // save current drawing and restore after resize
+      const data = canvas.toDataURL();
+      setCanvasSize();
+      const img = new Image();
+      img.onload = ()=> ctx.drawImage(img,0,0, canvas.width / (window.devicePixelRatio||1), canvas.height / (window.devicePixelRatio||1));
+      img.src = data;
+    });
+
+    // drawing style
+    function applyBrush(){
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = brushSize;
+      ctx.globalCompositeOperation = (tool === 'eraser') ? 'destination-out' : 'source-over';
+      ctx.strokeStyle = (tool === 'eraser') ? 'rgba(0,0,0,1)' : brushColor;
+    }
+
+    /* -------------------- POINTER HANDLERS -------------------- */
+    function getPointerPos(e){
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left),
+        y: (e.clientY - rect.top)
+      };
+    }
+
+    function pointerDown(e){
+      // ignore right-click
+      if(e.button === 2) return;
+      if(tool === 'text') return; // text is handled on click
+
+      drawing = true;
+      canvas.setPointerCapture(e.pointerId);
+      const pos = getPointerPos(e);
+      current = pos;
+      applyBrush();
+      ctx.beginPath();
+      ctx.moveTo(current.x, current.y);
+
+      // Save state before stroke for undo
+      pushUndo();
+    }
+
+    function pointerMove(e){
+      if(!drawing) return;
+      const pos = getPointerPos(e);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+      current = pos;
+    }
+
+    function pointerUp(e){
+      if(!drawing) return;
+      drawing = false;
+      ctx.closePath();
+      try{ canvas.releasePointerCapture(e.pointerId); }catch(err){}
+      // clear redo stack on new action
+      redoStack.length = 0;
+    }
+
+    // attach pointer events
+    canvas.addEventListener('pointerdown', pointerDown);
+    canvas.addEventListener('pointermove', pointerMove);
+    window.addEventListener('pointerup', pointerUp);
+
+    /* -------------------- UI CONTROLS -------------------- */
+    const pencilBtn = document.getElementById('pencilBtn');
+    const eraserBtn = document.getElementById('eraserBtn');
+    const colorPicker = document.getElementById('colorPicker');
+    const sizeRange = document.getElementById('sizeRange');
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const addNoteBtn = document.getElementById('addNoteBtn');
+    const textToolBtn = document.getElementById('textToolBtn');
+
+    function setActiveTool(t){
+      tool = t;
+      [pencilBtn, eraserBtn].forEach(b=>b.classList.remove('active'));
+      if(t === 'pencil') pencilBtn.classList.add('active');
+      if(t === 'eraser') eraserBtn.classList.add('active');
+      // text tool visual
+      if(t === 'text') textToolBtn.classList.add('active'); else textToolBtn.classList.remove('active');
+    }
+
+    pencilBtn.addEventListener('click', ()=> setActiveTool('pencil'));
+    eraserBtn.addEventListener('click', ()=> setActiveTool('eraser'));
+    colorPicker.addEventListener('change', (e)=> { brushColor = e.target.value; });
+    sizeRange.addEventListener('input', (e)=> { brushSize = parseInt(e.target.value,10); });
+
+    undoBtn.addEventListener('click', undo);
+    redoBtn.addEventListener('click', redo);
+    clearBtn.addEventListener('click', ()=>{
+      pushUndo();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+    });
+    saveBtn.addEventListener('click', saveImage);
+
+    addNoteBtn.addEventListener('click', createStickyNote);
+
+    textToolBtn.addEventListener('click', ()=> setActiveTool( tool === 'text' ? 'pencil' : 'text'));
+
+    /* -------------------- UNDO / REDO -------------------- */
+    function pushUndo(){
+      try{
+        if(undoStack.length >= MAX_STACK) undoStack.shift();
+        undoStack.push(canvas.toDataURL());
+      }catch(err){ console.warn('pushUndo err',err); }
+    }
+
+    function undo(){
+      if(undoStack.length === 0) return;
+      try{
+        const last = undoStack.pop();
+        redoStack.push(canvas.toDataURL());
+        restoreFromDataURL(last);
+      }catch(err){ console.warn(err); }
+    }
+
+    function redo(){
+      if(redoStack.length === 0) return;
+      try{
+        const last = redoStack.pop();
+        undoStack.push(canvas.toDataURL());
+        restoreFromDataURL(last);
+      }catch(err){ console.warn(err); }
+    }
+
+    function restoreFromDataURL(dataURL){
+      const img = new Image();
+      img.onload = function(){
+        // clear and draw scaled
+        ctx.clearRect(0,0, canvas.width, canvas.height);
+        const dpr = window.devicePixelRatio || 1;
+        ctx.drawImage(img, 0, 0, canvas.width / dpr, canvas.height / dpr);
+      }
+      img.src = dataURL;
+    }
+
+    /* -------------------- SAVE / DOWNLOAD -------------------- */
+    function saveImage(){
+      const data = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = data;
+      a.download = 'whiteboard.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    /* -------------------- TEXT TOOL -------------------- */
+    board.addEventListener('click', (e)=>{
+      if(tool !== 'text') return;
+      // click location relative to board
+      const rect = board.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      createTextItem(x,y);
+      // switch back to pencil for convenience
+      setActiveTool('pencil');
+    });
+
+    function createTextItem(x,y){
+      const el = document.createElement('div');
+      el.className = 'text-item';
+      el.contentEditable = true;
+      el.style.left = Math.max(6, x) + 'px';
+      el.style.top = Math.max(6, y) + 'px';
+      el.innerText = 'Edit text';
+      makeElementDraggable(el);
+      board.appendChild(el);
+      el.focus();
+    }
+
+    /* -------------------- STICKY NOTES -------------------- */
+    let noteCount = 0;
+    function createStickyNote(){
+      noteCount++;
+      const note = document.createElement('div');
+      note.className = 'note';
+      note.style.left = (20 + 20*noteCount) + 'px';
+      note.style.top = (20 + 20*noteCount) + 'px';
+      note.innerHTML = `
+        <div class="note-header"> 
+          <div style="font-weight:700">Note</div>
+          <div>
+            <button class="note-close">✕</button>
+          </div>
+        </div>
+        <div class="note-body" contenteditable="true">New note</div>
+      `;
+      board.appendChild(note);
+      makeNoteDraggable(note);
+      note.querySelector('.note-close').addEventListener('click', ()=> note.remove());
+    }
+
+    function makeNoteDraggable(note){
+      const header = note.querySelector('.note-header');
+      header.style.cursor = 'grab';
+      let offsetX=0, offsetY=0, dragging=false;
+      header.addEventListener('pointerdown', (ev)=>{
+        dragging = true;
+        offsetX = ev.clientX - note.getBoundingClientRect().left;
+        offsetY = ev.clientY - note.getBoundingClientRect().top;
+        header.setPointerCapture(ev.pointerId);
+      });
+      window.addEventListener('pointermove', (ev)=>{
+        if(!dragging) return;
+        const rect = board.getBoundingClientRect();
+        let left = ev.clientX - rect.left - offsetX;
+        let top = ev.clientY - rect.top - offsetY;
+        left = Math.max(0, Math.min(left, rect.width - note.offsetWidth));
+        top = Math.max(0, Math.min(top, rect.height - note.offsetHeight));
+        note.style.left = left + 'px';
+        note.style.top = top + 'px';
+      });
+      window.addEventListener('pointerup', (ev)=>{
+        dragging = false;
+      });
+    }
+
+    function makeElementDraggable(el){
+      let dragging = false, offsetX=0, offsetY=0;
+      el.addEventListener('pointerdown', (ev)=>{
+        dragging = true; offsetX = ev.clientX - el.getBoundingClientRect().left; offsetY = ev.clientY - el.getBoundingClientRect().top; el.setPointerCapture(ev.pointerId);
+      });
+      window.addEventListener('pointermove', (ev)=>{
+        if(!dragging) return;
+        const rect = board.getBoundingClientRect();
+        let left = ev.clientX - rect.left - offsetX;
+        let top = ev.clientY - rect.top - offsetY;
+        left = Math.max(0, Math.min(left, rect.width - el.offsetWidth));
+        top = Math.max(0, Math.min(top, rect.height - el.offsetHeight));
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+      });
+      window.addEventListener('pointerup', ()=> dragging = false);
+    }
+
+    /* -------------------- LOCAL STORAGE AUTO-LOAD -------------------- */
+    // On load, try to restore saved image
+    window.addEventListener('load', ()=>{
+      setCanvasSize();
+      const saved = localStorage.getItem('virtual_whiteboard_last');
+      if(saved){
+        restoreFromDataURL(saved);
+      } else {
+        // push initial blank state so undo works
+        pushUndo();
+      }
+    });
+
+    // Save periodically and on unload
+    function autosave(){
+      try{ localStorage.setItem('virtual_whiteboard_last', canvas.toDataURL()); }catch(err){ /* quota may fail */ }
+    }
+    setInterval(autosave, 5000);
+    window.addEventListener('beforeunload', autosave);
+
+    /* -------------------- KEYBOARD SHORTCUTS -------------------- */
+    window.addEventListener('keydown', (e)=>{
+      if((e.ctrlKey || e.metaKey) && e.key === 'z'){
+        e.preventDefault(); undo();
+      }
+      if((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))){
+        e.preventDefault(); redo();
+      }
+      if(e.key === 'Escape'){
+        setActiveTool('pencil');
+      }
+    });
+
+    /* -------------------- INITIALIZE DEFAULT TOOL -------------------- */
+    setActiveTool('pencil');
+
+  </script>
+</body>
+</html>
